@@ -1,3 +1,4 @@
+
 name: Build Barry Tech
 
 on:
@@ -15,20 +16,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract source
-        run: |
-          ARCHIVE=$(find . -maxdepth 1 -iname 'Barry_Tech_sources*.zip' -print -quit)
-          test -n "$ARCHIVE"
-          mkdir -p extracted
-          unzip -q "$ARCHIVE" -d extracted
-          FILE=$(find extracted -name pubspec.yaml -print -quit)
-          test -n "$FILE"
-          echo "PROJECT_DIR=$(dirname "$FILE")" >> "$GITHUB_ENV"
-
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
+      - name: Extract corrected source
+        run: |
+          mkdir -p extracted
+          unzip -q Barry_Tech_sources_corrige.zip -d extracted
+          FILE=$(find extracted -name pubspec.yaml -print -quit)
+          test -n "$FILE"
+          echo "PROJECT_DIR=$(dirname "$FILE")" >> "$GITHUB_ENV"
 
       - name: Generate Android files
         run: |
@@ -53,20 +52,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract source
-        shell: pwsh
-        run: |
-          $archive = Get-ChildItem -File | Where-Object { $_.Name -like 'Barry_Tech_sources*.zip' } | Select-Object -First 1
-          if (-not $archive) { throw 'ZIP not found' }
-          Expand-Archive -LiteralPath $archive.FullName -DestinationPath extracted -Force
-          $file = Get-ChildItem extracted -Filter pubspec.yaml -Recurse | Select-Object -First 1
-          if (-not $file) { throw 'pubspec.yaml not found' }
-          "PROJECT_DIR=$($file.Directory.FullName)" >> $env:GITHUB_ENV
-
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
+      - name: Extract corrected source
+        shell: pwsh
+        run: |
+          Expand-Archive -LiteralPath Barry_Tech_sources_corrige.zip -DestinationPath extracted -Force
+          $file = Get-ChildItem extracted -Filter pubspec.yaml -Recurse | Select-Object -First 1
+          if (-not $file) { throw 'pubspec.yaml not found' }
+          "PROJECT_DIR=$($file.Directory.FullName)" >> $env:GITHUB_ENV
 
       - name: Generate Windows files
         shell: pwsh
