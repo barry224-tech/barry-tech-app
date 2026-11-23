@@ -1,0 +1,67 @@
+name: Build Barry Tech
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract project
+        run: |
+          ARCHIVE=$(find . -maxdepth 1 -iname 'Barry_Tech_sources*.zip' -print -quit)
+          test -n "$ARCHIVE"
+          unzip -q "$ARCHIVE" -d extracted
+          PROJECT_DIR=$(dirname "$(find extracted -name pubspec.yaml -print -quit)")
+          test -f "$PROJECT_DIR/pubspec.yaml"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Build APK
+        run: |
+          cd "$PROJECT_DIR"
+          flutter pub get
+          flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Barry-Tech-Android-APK
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract project
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem -File -Filter 'Barry_Tech_sources*.zip' | Select-Object -First 1
+          if (-not $archive) { throw "Archive introuvable" }
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath extracted
+          $project = Get-ChildItem extracted -Filter pubspec.yaml -Recurse | Select-Object -First 1
+          if (-not $project) { throw "pubspec.yaml introuvable" }
+          "PROJECT_DIR=$($project.Directory.FullName)" >> $env:GITHUB_ENV
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Build Windows
+        run: |
+          cd $env:PROJECT_DIR
+          flutter config --enable-windows-desktop
+          flutter pub get
+          flutter build windows --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Barry-Tech-Windows
+          path: ${{ env.PROJECT_DIR }}/build/windows/x64/runner/Release/
