@@ -29,22 +29,22 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
       - name: Extract project
         run: |
           mkdir extracted
           unzip -q Barry_Tech_sources_corrige.zip -d extracted
-          PROJECT_FILE=$(find extracted -name pubspec.yaml -print -quit)
-          test -n "$PROJECT_FILE"
-          PROJECT_DIR=$(dirname "$PROJECT_FILE")
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          FILE=$(find extracted -name pubspec.yaml -print -quit)
+          test -n "$FILE"
+          echo "PROJECT_DIR=$(dirname "$FILE")" >> "$GITHUB_ENV"
 
       - name: Generate Android platform
         run: |
           cd "$PROJECT_DIR"
           flutter create --platforms=android .
-      
-      - name: Set Android SDK 36
+
+      - name: Configure Android SDK 36
         run: |
           cd "$PROJECT_DIR"
           python3 - <<'PY'
@@ -54,31 +54,34 @@ jobs:
           app = Path("android/app")
           files = list(app.glob("build.gradle")) + list(app.glob("build.gradle.kts"))
           if not files:
-              raise SystemExit("Fichier Gradle Android introuvable")
+              raise SystemExit("Gradle Android introuvable")
 
+          found = False
           for file in files:
               text = file.read_text()
-              text = re.sub(
-                  r'compileSdkVersion\s+flutter\.compileSdkVersion',
-                  'compileSdkVersion 36',
-                  text
-              )
-              text = re.sub(
-                  r'compileSdk\s*=\s*flutter\.compileSdkVersion',
-                  'compileSdk = 36',
-                  text
-              )
-              text = re.sub(
-                  r'compileSdk\s+flutter\.compileSdkVersion',
-                  'compileSdk 36',
-                  text
-              )
+              patterns = [
+                  (r'compileSdkVersion\s+flutter\.compileSdkVersion',
+                   'compileSdkVersion 36'),
+                  (r'compileSdk\s*=\s*flutter\.compileSdkVersion',
+                   'compileSdk = 36'),
+                  (r'compileSdk\s+flutter\.compileSdkVersion',
+                   'compileSdk 36'),
+              ]
+              for pattern, replacement in patterns:
+                  text, count = re.subn(pattern, replacement, text)
+                  found = found or count > 0
               file.write_text(text)
 
-          if not any(re.search(r'compileSdk(?:Version)?\s*(?:=)?\s*36\b', f.read_text()) for f in files):
-              raise SystemExit("ERREUR : SDK 36 non appliqué")
-          print("SDK 36 vérifié.")
+          if not found:
+              raise SystemExit("Impossible de modifier compileSdk")
+
+          print("Android compileSdk configuré à 36")
           PY
+
+      - name: Verify Android SDK
+        run: |
+          cd "$PROJECT_DIR"
+          grep -R -n -E 'compileSdk(Version)?[ =]+36' android/app
 
       - name: Build APK
         run: |
@@ -91,6 +94,7 @@ jobs:
         with:
           name: Barry-Tech-Android-APK
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
 
   windows:
     name: Build Windows application
@@ -104,30 +108,39 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
       - name: Extract project
         shell: pwsh
         run: |
           Expand-Archive Barry_Tech_sources_corrige.zip extracted
-          $project = Get-ChildItem extracted -Filter pubspec.yaml -Recurse | Select-Object -First 1
-          if ($null -eq $project) { throw "pubspec.yaml introuvable" }
-          "PROJECT_DIR=$($project.Directory.FullName)" >> $env:GITHUB_ENV
+          $file = Get-ChildItem extracted -Filter pubspec.yaml -Recurse | Select-Object -First 1
+          if (-not $file) { throw "pubspec.yaml introuvable" }
+          "PROJECT_DIR=$($file.Directory.FullName)" >> $env:GITHUB_ENV
 
       - name: Generate Windows platform
         shell: pwsh
         run: |
-          cd $env:PROJECT_DIR
+          Set-Location $env:PROJECT_DIR
           flutter create --platforms=windows .
 
       - name: Build Windows
         shell: pwsh
         run: |
-          cd $env:PROJECT_DIR
+          Set-Location $env:PROJECT_DIR
           flutter pub get
           flutter build windows --release
 
-      - name: Upload Windows application
+      - name: Package Windows
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:PROJECT_DIR 'build/windows/x64/runner/Release'
+          if (-not (Test-Path $dir)) { throw "Release introuvable" }
+          Compress-Archive -Path "$dir/*" -DestinationPath Barry-Tech-Windows.zip -Force
+
+      - name: Upload Windows
         uses: actions/upload-artifact@v4
         with:
           name: Barry-Tech-Windows
-          path: ${{ env.PROJECT_DIR }}/build/windows/x64/runner/Release/
+          path: Barry-Tech-Windows.zip
+          if-no-files-found: error
