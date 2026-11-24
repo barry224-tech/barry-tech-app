@@ -3,7 +3,8 @@ name: Build Barry Tech
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -13,43 +14,70 @@ jobs:
   android:
     name: Build Android APK
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: subosito/flutter-action@v2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
 
-      - name: Extract corrected source
+      - name: Extract project
         run: |
-          ARCHIVE=$(find . -maxdepth 1 -iname 'Barry_Tech_sources*.zip' -print -quit)
-          test -n "$ARCHIVE"
-          mkdir -p extracted
-          unzip -q "$ARCHIVE" -d extracted
-          FILE=$(find extracted -name pubspec.yaml -print -quit)
-          test -n "$FILE"
-          echo "PROJECT_DIR=$(dirname "$FILE")" >> "$GITHUB_ENV"
+          mkdir extracted
+          unzip -q Barry_Tech_sources_corrige.zip -d extracted
+          PROJECT_FILE=$(find extracted -name pubspec.yaml -print -quit)
+          test -n "$PROJECT_FILE"
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Generate Android files
+      - name: Generate Android platform
         run: |
           cd "$PROJECT_DIR"
-          flutter create --platforms=android --org com.barrytech .
-
-      - name: Set Android compile SDK
+          flutter create --platforms=android .
+      
+      - name: Set Android SDK 36
         run: |
           cd "$PROJECT_DIR"
           python3 - <<'PY'
           from pathlib import Path
-          p = Path("android/app/build.gradle.kts")
-          if not p.exists():
-              p = Path("android/app/build.gradle")
-          if not p.exists():
+          import re
+
+          app = Path("android/app")
+          files = list(app.glob("build.gradle")) + list(app.glob("build.gradle.kts"))
+          if not files:
               raise SystemExit("Fichier Gradle Android introuvable")
-          s = p.read_text()
-          if "flutter.compileSdkVersion" not in s:
-              raise SystemExit("compileSdkVersion introuvable")
-          p.write_text(s.replace("flutter.compileSdkVersion", "36"))
+
+          for file in files:
+              text = file.read_text()
+              text = re.sub(
+                  r'compileSdkVersion\s+flutter\.compileSdkVersion',
+                  'compileSdkVersion 36',
+                  text
+              )
+              text = re.sub(
+                  r'compileSdk\s*=\s*flutter\.compileSdkVersion',
+                  'compileSdk = 36',
+                  text
+              )
+              text = re.sub(
+                  r'compileSdk\s+flutter\.compileSdkVersion',
+                  'compileSdk 36',
+                  text
+              )
+              file.write_text(text)
+
+          if not any(re.search(r'compileSdk(?:Version)?\s*(?:=)?\s*36\b', f.read_text()) for f in files):
+              raise SystemExit("ERREUR : SDK 36 non appliqué")
+          print("SDK 36 vérifié.")
           PY
 
       - name: Build APK
@@ -58,55 +86,48 @@ jobs:
           flutter pub get
           flutter build apk --release
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: Barry-Tech-Android-APK
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
 
   windows:
     name: Build Windows application
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Extract corrected source
-        shell: pwsh
-        run: |
-          $archive = Get-ChildItem -File | Where-Object { $_.Name -like 'Barry_Tech_sources*.zip' } | Select-Object -First 1
-          if (-not $archive) { throw 'ZIP not found' }
-          Expand-Archive -LiteralPath $archive.FullName -DestinationPath extracted -Force
-          $file = Get-ChildItem extracted -Filter pubspec.yaml -Recurse | Select-Object -First 1
-          if (-not $file) { throw 'pubspec.yaml not found' }
-          "PROJECT_DIR=$($file.Directory.FullName)" >> $env:GITHUB_ENV
-
-      - uses: subosito/flutter-action@v2
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
 
-      - name: Generate Windows files
+      - name: Extract project
         shell: pwsh
         run: |
-          Set-Location $env:PROJECT_DIR
-          flutter create --platforms=windows --org com.barrytech .
+          Expand-Archive Barry_Tech_sources_corrige.zip extracted
+          $project = Get-ChildItem extracted -Filter pubspec.yaml -Recurse | Select-Object -First 1
+          if ($null -eq $project) { throw "pubspec.yaml introuvable" }
+          "PROJECT_DIR=$($project.Directory.FullName)" >> $env:GITHUB_ENV
+
+      - name: Generate Windows platform
+        shell: pwsh
+        run: |
+          cd $env:PROJECT_DIR
+          flutter create --platforms=windows .
 
       - name: Build Windows
         shell: pwsh
         run: |
-          Set-Location $env:PROJECT_DIR
+          cd $env:PROJECT_DIR
           flutter pub get
           flutter build windows --release
 
-      - name: Package Windows
-        shell: pwsh
-        run: |
-          $dir = Join-Path $env:PROJECT_DIR 'build/windows/x64/runner/Release'
-          if (-not (Test-Path $dir)) { throw 'Release folder not found' }
-          Compress-Archive -Path "$dir/*" -DestinationPath Barry-Tech-Windows.zip -Force
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload Windows application
+        uses: actions/upload-artifact@v4
         with:
           name: Barry-Tech-Windows
-          path: Barry-Tech-Windows.zip
-          if-no-files-found: error
+          path: ${{ env.PROJECT_DIR }}/build/windows/x64/runner/Release/
